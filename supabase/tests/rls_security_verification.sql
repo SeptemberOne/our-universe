@@ -278,7 +278,10 @@ BEGIN
     RAISE EXCEPTION 'Cross-couple leakage: User D read User A/B profiles';
   END IF;
 
-  -- Storage RLS verification on couple-photos bucket (INSERT, SELECT, UPDATE, DELETE).
+  -- Storage RLS verification on couple-photos bucket (INSERT, SELECT, UPDATE).
+  -- Note: Direct SQL DELETE on storage.objects is intentionally omitted because Supabase's
+  -- storage.protect_delete() trigger forbids direct SQL deletion. Runtime Storage DELETE
+  -- permissions are verified separately via the Storage API in scripts/verify-storage-delete.mjs.
   v_photo_path := v_couple_1::text || '/sunset.jpg';
 
   -- Member User A uploads a photo into couple_1 folder; path traversal is rejected.
@@ -310,7 +313,7 @@ BEGIN
     RAISE EXCEPTION 'Expected partner User B to update 1 couple-photos object, updated %', v_row_count;
   END IF;
 
-  -- Uncoupled outsider User C cannot INSERT, SELECT, UPDATE, or DELETE couple_1 photos.
+  -- Uncoupled outsider User C cannot INSERT, SELECT, or UPDATE couple_1 photos.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_c, 'role', 'authenticated')::text, true);
   BEGIN
     INSERT INTO storage.objects (bucket_id, name, owner, metadata)
@@ -334,14 +337,7 @@ BEGIN
     RAISE EXCEPTION 'Leakage: User C updated % couple_1 photos', v_row_count;
   END IF;
 
-  DELETE FROM storage.objects
-  WHERE bucket_id = 'couple-photos' AND name = v_photo_path;
-  GET DIAGNOSTICS v_row_count = ROW_COUNT;
-  IF v_row_count <> 0 THEN
-    RAISE EXCEPTION 'Leakage: User C deleted % couple_1 photos', v_row_count;
-  END IF;
-
-  -- Cross-couple user User D cannot INSERT, SELECT, UPDATE, or DELETE couple_1 photos.
+  -- Cross-couple user User D cannot INSERT, SELECT, or UPDATE couple_1 photos.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_d, 'role', 'authenticated')::text, true);
   BEGIN
     INSERT INTO storage.objects (bucket_id, name, owner, metadata)
@@ -364,27 +360,12 @@ BEGIN
   IF v_row_count <> 0 THEN
     RAISE EXCEPTION 'Cross-couple leakage: User D updated % couple_1 photos', v_row_count;
   END IF;
-
-  DELETE FROM storage.objects
-  WHERE bucket_id = 'couple-photos' AND name = v_photo_path;
-  GET DIAGNOSTICS v_row_count = ROW_COUNT;
-  IF v_row_count <> 0 THEN
-    RAISE EXCEPTION 'Cross-couple leakage: User D deleted % couple_1 photos', v_row_count;
-  END IF;
-
-  -- Partner User B can delete couple_1 photo.
-  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_b, 'role', 'authenticated')::text, true);
-  DELETE FROM storage.objects
-  WHERE bucket_id = 'couple-photos' AND name = v_photo_path;
-  GET DIAGNOSTICS v_row_count = ROW_COUNT;
-  IF v_row_count <> 1 THEN
-    RAISE EXCEPTION 'Expected partner User B to delete 1 couple-photos object, deleted %', v_row_count;
-  END IF;
 END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Block 3 (owner role): Verify DB-level 2-member cap & seed expired invite
+-- Block 3 (owner role): Verify DB-level 2-member cap, static Storage DELETE
+-- policy catalog entry, & seed expired invite
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 
@@ -395,7 +376,30 @@ DECLARE
   v_couple_1 uuid := current_setting('our_universe_test.couple_1')::uuid;
   v_couple_2 uuid := current_setting('our_universe_test.couple_2')::uuid;
   v_expired_token text := 'expired-test-token-value-only';
+  v_delete_policy_qual text;
 BEGIN
+  -- Static catalog inspection ONLY for couple_photos_delete_member (does NOT replace
+  -- running scripts/verify-storage-delete.mjs against the live Storage API).
+  SELECT p.qual
+  INTO v_delete_policy_qual
+  FROM pg_policies p
+  WHERE p.schemaname = 'storage'
+    AND p.tablename = 'objects'
+    AND p.policyname = 'couple_photos_delete_member'
+    AND p.cmd = 'DELETE'
+    AND p.permissive = 'PERMISSIVE'
+    AND p.roles = ARRAY['authenticated']::name[];
+
+  IF v_delete_policy_qual IS NULL THEN
+    RAISE EXCEPTION 'Expected storage.objects DELETE policy couple_photos_delete_member for authenticated';
+  END IF;
+
+  IF v_delete_policy_qual NOT LIKE '%couple-photos%'
+     OR v_delete_policy_qual NOT LIKE '%try_parse_uuid%'
+     OR v_delete_policy_qual NOT LIKE '%current_user_couple_id%' THEN
+    RAISE EXCEPTION 'Unexpected couple_photos_delete_member qual definition: %', v_delete_policy_qual;
+  END IF;
+
   -- Even as table owner, inserting a 3rd member into full couple_1 fails in trigger/constraints.
   BEGIN
     INSERT INTO public.couple_members (couple_id, user_id, member_slot, role)
@@ -448,7 +452,7 @@ BEGIN
     END IF;
   END;
 
-  RAISE NOTICE 'ALL RLS & TWO-MEMBER SECURITY CHECKS PASSED';
+  RAISE NOTICE 'ALL SQL RLS CHECKS & STATIC STORAGE DELETE CATALOG CHECK PASSED (run scripts/verify-storage-delete.mjs for live Storage DELETE authorization)';
 END;
 $$;
 

@@ -56,11 +56,27 @@ To prevent authenticated users from probing arbitrary `couple_id` or `user_id` U
 
 ## 6. Verification & manual Supabase setup
 
-- **Automated JS tests (`tests/supabaseFoundation.test.mjs`)**: verify client config validation/guards and perform static structural checks on the SQL files. **Static JS checks do not execute SQL or prove live PostgreSQL security.**
-- **SQL RLS verification test (`supabase/tests/rls_security_verification.sql`)**: runs inside `BEGIN ... ROLLBACK` with top-level `SET LOCAL ROLE authenticated;` / `RESET ROLE;` transitions and verifies two-member linking, unrelated user (`User C`) and cross-couple (`User D`) isolation across tables and all Storage CRUD verbs (`INSERT`, `SELECT`, `UPDATE`, `DELETE`), invitation single-use/revocation/expiry, two-member caps, and direct-write rejection.
-- **Manual steps once you create your Supabase project**:
-  1. Create a Supabase project in the Supabase Dashboard (or start local Supabase CLI).
-  2. Apply both migrations in [`supabase/migrations/`](../supabase/migrations/) in order (`20261127000100_initial_couple_schema.sql`, then `20261127000200_private_couple_photos_storage.sql`).
-  3. Execute [`supabase/tests/rls_security_verification.sql`](../supabase/tests/rls_security_verification.sql) against your live Supabase PostgreSQL database (`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/rls_security_verification.sql`) and confirm `ALL RLS & TWO-MEMBER SECURITY CHECKS PASSED`.
-  4. Copy `.env.example` to `.env` locally and set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (public anon/publishable key only).
-  5. Configure Supabase Auth providers/redirect URLs when implementing sign-in UI in Phase 2 — Step 2.
+- **Automated JS tests (`tests/supabaseFoundation.test.mjs`)**: verify client config validation/guards and perform static structural checks on the SQL files and scripts. **Static JS checks do not execute SQL or prove live PostgreSQL security.**
+- **SQL RLS verification test (`supabase/tests/rls_security_verification.sql`)**: runs inside `BEGIN ... ROLLBACK` with top-level `SET LOCAL ROLE authenticated;` / `RESET ROLE;` transitions. It verifies two-member linking, unrelated user (`User C`) and cross-couple (`User D`) isolation across tables and Storage `INSERT`, `SELECT`, and `UPDATE`, invitation single-use/revocation/expiry, two-member caps, and direct-write rejection. Because Supabase's `storage.protect_delete()` trigger forbids direct SQL `DELETE FROM storage.objects`, the SQL script inspects `pg_policies` for `couple_photos_delete_member` as a **static catalog check only**.
+- **Executable Storage API DELETE integration test (`scripts/verify-storage-delete.mjs`)**: tests live runtime Storage `DELETE` permissions through the Supabase Storage API (`storage.from('couple-photos').remove(...)`) using authenticated sessions for an unrelated outsider (`User C`), a member of another couple (`User D`), and a legitimate couple member (`User B`), and cleans up uploaded files via the Storage API.
+
+### Running both live tests against a Supabase project
+
+1. Create a Supabase project in the Supabase Dashboard (or start local Supabase CLI).
+2. Apply both migrations in [`supabase/migrations/`](../supabase/migrations/) in order (`20261127000100_initial_couple_schema.sql`, then `20261127000200_private_couple_photos_storage.sql`).
+3. **Run the SQL verification script** against your live Supabase Postgres database:
+   ```bash
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/rls_security_verification.sql
+   ```
+   Confirm `ALL SQL RLS CHECKS & STATIC STORAGE DELETE CATALOG CHECK PASSED`.
+4. **Run the Storage API DELETE integration test** with shell-scoped environment variables (never put `SUPABASE_SERVICE_ROLE_KEY` in `.env` or mobile app code):
+   ```powershell
+   $env:SUPABASE_URL = "https://your-project-ref.supabase.co"
+   $env:SUPABASE_ANON_KEY = "your-supabase-anon-key"
+   $env:SUPABASE_SERVICE_ROLE_KEY = "your-supabase-service-role-key"
+   npm run test:storage-delete
+   Remove-Item Env:SUPABASE_SERVICE_ROLE_KEY
+   ```
+   Confirm `STORAGE API DELETE AUTHORIZATION CHECKS PASSED`.
+5. Copy `.env.example` to `.env` locally and set only `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (public anon/publishable key only).
+6. Configure Supabase Auth providers/redirect URLs when implementing sign-in UI in Phase 2 — Step 2.

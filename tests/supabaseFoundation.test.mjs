@@ -192,5 +192,15 @@ test('static SQL structure checks: migrations & verification script define harde
   assert.match(rlsTestSql, /invitation_expired/);
   assert.match(rlsTestSql, /INSERT INTO storage\.objects/);
   assert.match(rlsTestSql, /UPDATE storage\.objects/);
-  assert.match(rlsTestSql, /DELETE FROM storage\.objects/);
+  // Direct SQL DELETE on storage.objects is forbidden by storage.protect_delete()
+  assert.equal(/DELETE FROM storage\.objects/i.test(rlsTestSql), false);
+  assert.match(rlsTestSql, /FROM pg_policies/i);
+  assert.match(rlsTestSql, /couple_photos_delete_member/);
+
+  const storageDeleteScript = fs.readFileSync(
+    path.join(REPO_ROOT, 'scripts/verify-storage-delete.mjs'),
+    'utf8',
+  );
+  assert.match(storageDeleteScript, /\.storage\.from\('couple-photos'\)\.remove\(/);
+  assert.equal(/DELETE FROM storage\.objects/i.test(storageDeleteScript), false);
 });
