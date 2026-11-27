@@ -27,6 +27,11 @@ import {
   validateDisplayName,
   validateInviteToken,
 } from '@/features/couple/coupleLogic';
+import {
+  shareInvitationToken,
+  type WebDocumentLike,
+  type WebNavigatorLike,
+} from '@/features/couple/inviteShare';
 import { getAppLanguage, setAppLanguage, type AppLanguage } from '@/i18n';
 import { colors, layout, radius, spacing, typography } from '@/theme/tokens';
 
@@ -60,10 +65,15 @@ export default function CoupleSpaceScreen() {
   const [inviteTokenInput, setInviteTokenInput] = useState('');
   const [displayNameDraft, setDisplayNameDraft] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<
-    'create' | 'join' | 'invite' | 'revoke' | 'profile' | 'signOut' | null
+    'create' | 'join' | 'invite' | 'share' | 'revoke' | 'profile' | 'signOut' | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{
+    invitationId: string;
+    tone: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const displayNameInput = displayNameDraft ?? (snapshot?.myProfile?.displayName ?? '');
 
@@ -149,6 +159,7 @@ export default function CoupleSpaceScreen() {
   const handleGenerateInvite = useCallback(async () => {
     setActionError(null);
     setActionSuccess(null);
+    setShareFeedback(null);
     setBusyAction('invite');
     try {
       const result = await createInvitation(24);
@@ -166,15 +177,55 @@ export default function CoupleSpaceScreen() {
     if (!generatedInvitation) {
       return;
     }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setShareFeedback(null);
+    setBusyAction('share');
+
+    const webNavigator =
+      'navigator' in globalThis
+        ? ((globalThis as { navigator?: WebNavigatorLike }).navigator ?? null)
+        : null;
+    const webDocument =
+      'document' in globalThis
+        ? ((globalThis as { document?: WebDocumentLike }).document ?? null)
+        : null;
+
     try {
-      await Share.share({
+      const outcome = await shareInvitationToken({
+        platformOS: Platform.OS,
         title: t('couple.invitation.shareTitle'),
         message: t('couple.invitation.shareMessage', {
           token: generatedInvitation.inviteToken,
         }),
+        token: generatedInvitation.inviteToken,
+        nativeShare: (content) => Share.share(content),
+        webNavigator,
+        webDocument,
       });
-    } catch {
-      // User cancelled share sheet; no error banner required.
+
+      if (outcome.status === 'shared') {
+        setShareFeedback({
+          invitationId: generatedInvitation.invitationId,
+          tone: 'success',
+          message: t('couple.invitation.sharedSuccess'),
+        });
+      } else if (outcome.status === 'copied') {
+        setShareFeedback({
+          invitationId: generatedInvitation.invitationId,
+          tone: 'success',
+          message: t('couple.invitation.copiedSuccess'),
+        });
+      } else if (outcome.status === 'failed') {
+        setShareFeedback({
+          invitationId: generatedInvitation.invitationId,
+          tone: 'error',
+          message: t('couple.invitation.shareFailed'),
+        });
+      }
+    } finally {
+      setBusyAction(null);
     }
   }, [generatedInvitation, t]);
 
@@ -182,6 +233,7 @@ export default function CoupleSpaceScreen() {
     async (invitationId: string) => {
       setActionError(null);
       setActionSuccess(null);
+      setShareFeedback(null);
       setBusyAction('revoke');
       try {
         const result = await revokeInvitation(invitationId);
@@ -458,6 +510,8 @@ export default function CoupleSpaceScreen() {
                               <CelestialButton
                                 label={t('couple.invitation.share')}
                                 onPress={() => void handleShareInvite()}
+                                loading={busyAction === 'share'}
+                                disabled={busyAction !== null}
                                 variant="primary"
                                 style={styles.rowButton}
                               />
@@ -472,6 +526,26 @@ export default function CoupleSpaceScreen() {
                                 style={styles.rowButton}
                               />
                             </View>
+                            {shareFeedback?.invitationId === generatedInvitation.invitationId ? (
+                              <View
+                                style={
+                                  shareFeedback.tone === 'success'
+                                    ? styles.successBanner
+                                    : styles.errorBanner
+                                }
+                                accessibilityLiveRegion="polite"
+                              >
+                                <Text
+                                  style={
+                                    shareFeedback.tone === 'success'
+                                      ? styles.successText
+                                      : styles.errorText
+                                  }
+                                >
+                                  {shareFeedback.message}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
                         ) : snapshot?.activeInvitation ? (
                           <View style={styles.tokenBox}>

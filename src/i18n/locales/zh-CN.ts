@@ -203,6 +203,9 @@ export const zhCN: TranslationSchema = {
       generatedSuccess: '已生成新的邀请口令。',
       revokedSuccess: '邀请已撤销。',
       joinedSuccess: '连接成功！你们的两个账号现已绑定同一空间。',
+      sharedSuccess: '邀请口令已分享。',
+      copiedSuccess: '邀请口令已复制到剪贴板。',
+      shareFailed: '无法自动分享或复制口令，请手动选中并复制。',
     },
     profile: {
       heading: '个人资料',

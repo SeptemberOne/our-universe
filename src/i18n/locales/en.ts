@@ -202,6 +202,9 @@ export const en = {
       generatedSuccess: 'Invitation token generated.',
       revokedSuccess: 'Invitation revoked.',
       joinedSuccess: 'Welcome! Your two accounts are now linked.',
+      sharedSuccess: 'Invitation shared.',
+      copiedSuccess: 'Invitation token copied to clipboard.',
+      shareFailed: 'Could not share or copy the token automatically. Please select and copy it manually.',
     },
     profile: {
       heading: 'YOUR PROFILE',
