@@ -3,6 +3,10 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
+GRANT USAGE ON SCHEMA private TO authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Timestamp & profile bootstrap triggers
 -- ---------------------------------------------------------------------------
@@ -17,6 +21,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.set_updated_at() FROM PUBLIC, anon, authenticated;
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -53,6 +59,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -120,6 +128,8 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.enforce_max_two_couple_members() FROM PUBLIC, anon, authenticated;
+
 DROP TRIGGER IF EXISTS couple_members_enforce_max_two ON public.couple_members;
 CREATE TRIGGER couple_members_enforce_max_two
   BEFORE INSERT ON public.couple_members
@@ -155,50 +165,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS couple_invitations_one_pending_per_couple_idx
   WHERE status = 'pending';
 
 -- ---------------------------------------------------------------------------
--- RLS membership helpers (SECURITY DEFINER avoids recursive RLS evaluation)
+-- Zero-argument private RLS helper (prevents probing arbitrary UUIDs via RPC)
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.is_couple_member(p_couple_id uuid)
-RETURNS boolean
+CREATE OR REPLACE FUNCTION private.current_user_couple_id()
+RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $$
-  SELECT auth.uid() IS NOT NULL
-    AND p_couple_id IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.couple_members cm
-      WHERE cm.couple_id = p_couple_id
-        AND cm.user_id = auth.uid()
-    );
+  SELECT cm.couple_id
+  FROM public.couple_members cm
+  WHERE cm.user_id = auth.uid()
+  LIMIT 1;
 $$;
 
-CREATE OR REPLACE FUNCTION public.shares_couple_with(p_other_user_id uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = ''
-AS $$
-  SELECT auth.uid() IS NOT NULL
-    AND p_other_user_id IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.couple_members me
-      JOIN public.couple_members partner
-        ON partner.couple_id = me.couple_id
-      WHERE me.user_id = auth.uid()
-        AND partner.user_id = p_other_user_id
-    );
-$$;
-
-REVOKE ALL ON FUNCTION public.is_couple_member(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_couple_member(uuid) TO authenticated;
-
-REVOKE ALL ON FUNCTION public.shares_couple_with(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.shares_couple_with(uuid) TO authenticated;
+REVOKE ALL ON FUNCTION private.current_user_couple_id() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.current_user_couple_id() TO authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security & least-privilege table grants
@@ -237,7 +221,14 @@ CREATE POLICY profiles_select_self_or_partner
   ON public.profiles
   FOR SELECT
   TO authenticated
-  USING (id = auth.uid() OR public.shares_couple_with(id));
+  USING (
+    id = auth.uid()
+    OR id IN (
+      SELECT cm.user_id
+      FROM public.couple_members cm
+      WHERE cm.couple_id = (SELECT private.current_user_couple_id())
+    )
+  );
 
 DROP POLICY IF EXISTS profiles_update_self ON public.profiles;
 CREATE POLICY profiles_update_self
@@ -252,29 +243,29 @@ CREATE POLICY couples_select_member
   ON public.couples
   FOR SELECT
   TO authenticated
-  USING (public.is_couple_member(id));
+  USING (id = (SELECT private.current_user_couple_id()));
 
 DROP POLICY IF EXISTS couples_update_member ON public.couples;
 CREATE POLICY couples_update_member
   ON public.couples
   FOR UPDATE
   TO authenticated
-  USING (public.is_couple_member(id))
-  WITH CHECK (public.is_couple_member(id));
+  USING (id = (SELECT private.current_user_couple_id()))
+  WITH CHECK (id = (SELECT private.current_user_couple_id()));
 
 DROP POLICY IF EXISTS couple_members_select_member ON public.couple_members;
 CREATE POLICY couple_members_select_member
   ON public.couple_members
   FOR SELECT
   TO authenticated
-  USING (public.is_couple_member(couple_id));
+  USING (couple_id = (SELECT private.current_user_couple_id()));
 
 DROP POLICY IF EXISTS couple_invitations_select_member ON public.couple_invitations;
 CREATE POLICY couple_invitations_select_member
   ON public.couple_invitations
   FOR SELECT
   TO authenticated
-  USING (public.is_couple_member(couple_id));
+  USING (couple_id = (SELECT private.current_user_couple_id()));
 
 -- ---------------------------------------------------------------------------
 -- Audited SECURITY DEFINER RPCs for couple creation & invitation lifecycle
@@ -520,7 +511,7 @@ BEGIN
     RETURN false;
   END IF;
 
-  IF NOT public.is_couple_member(v_invite.couple_id) THEN
+  IF v_invite.couple_id IS DISTINCT FROM private.current_user_couple_id() THEN
     RAISE EXCEPTION 'not_authorized' USING ERRCODE = '42501';
   END IF;
 

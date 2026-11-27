@@ -2,6 +2,10 @@
 -- Path convention: couple-photos/<couple_id>/<photo_uuid>.<ext>
 -- Note: Upload/download UI is intentionally deferred to Phase 3.
 
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
+GRANT USAGE ON SCHEMA private TO authenticated;
+
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
   'couple-photos',
@@ -16,7 +20,7 @@ SET
   file_size_limit = EXCLUDED.file_size_limit,
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
-CREATE OR REPLACE FUNCTION public.try_parse_uuid(p_text text)
+CREATE OR REPLACE FUNCTION private.try_parse_uuid(p_text text)
 RETURNS uuid
 LANGUAGE plpgsql
 IMMUTABLE
@@ -30,8 +34,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.try_parse_uuid(text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.try_parse_uuid(text) TO authenticated;
+REVOKE ALL ON FUNCTION private.try_parse_uuid(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.try_parse_uuid(text) TO authenticated;
 
 DROP POLICY IF EXISTS couple_photos_select_member ON storage.objects;
 CREATE POLICY couple_photos_select_member
@@ -41,7 +45,7 @@ CREATE POLICY couple_photos_select_member
   USING (
     bucket_id = 'couple-photos'
     AND name NOT LIKE '%..%'
-    AND public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))
+    AND private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())
   );
 
 DROP POLICY IF EXISTS couple_photos_insert_member ON storage.objects;
@@ -53,7 +57,7 @@ CREATE POLICY couple_photos_insert_member
     bucket_id = 'couple-photos'
     AND owner = auth.uid()
     AND name NOT LIKE '%..%'
-    AND public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))
+    AND private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())
   );
 
 DROP POLICY IF EXISTS couple_photos_update_member ON storage.objects;
@@ -64,12 +68,12 @@ CREATE POLICY couple_photos_update_member
   USING (
     bucket_id = 'couple-photos'
     AND name NOT LIKE '%..%'
-    AND public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))
+    AND private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())
   )
   WITH CHECK (
     bucket_id = 'couple-photos'
     AND name NOT LIKE '%..%'
-    AND public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))
+    AND private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())
   );
 
 DROP POLICY IF EXISTS couple_photos_delete_member ON storage.objects;
@@ -80,5 +84,5 @@ CREATE POLICY couple_photos_delete_member
   USING (
     bucket_id = 'couple-photos'
     AND name NOT LIKE '%..%'
-    AND public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))
+    AND private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())
   );

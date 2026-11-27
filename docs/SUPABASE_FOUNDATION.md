@@ -33,16 +33,18 @@ The 2-account limit is enforced by **five independent PostgreSQL layers**, not i
    - `create_couple_space(p_title)` — creates the couple and inserts the caller into `member_slot = 1`.
    - `accept_couple_invitation(p_invite_token)` — locks the invitation row (`FOR UPDATE`), verifies `status = 'pending'`, `expires_at > now()`, and `invited_by <> auth.uid()`, locks the couple row (`FOR UPDATE`), verifies the couple still has `< 2` members and the caller is not already in a couple, inserts the caller into `member_slot = 2`, and atomically marks the invitation `'accepted'` so it cannot be reused by a third account.
 
-## 4. Row Level Security & privilege matrix
+## 4. Row Level Security, private helpers, & privilege matrix
 
 All tables have `ENABLE ROW LEVEL SECURITY` and `REVOKE ALL` from `PUBLIC` and `anon`.
 
+To prevent authenticated users from probing arbitrary `couple_id` or `user_id` UUIDs via PostgREST RPC calls, RLS policies do **not** expose parameterized membership helpers in `public`. Instead, policies use a zero-argument `SECURITY DEFINER` helper `private.current_user_couple_id()` in the non-API-exposed `private` schema, which only ever looks up `auth.uid()`. Direct `EXECUTE` on trigger functions is also revoked from `PUBLIC`, `anon`, and `authenticated`.
+
 | Table | `anon` | `authenticated` privileges | RLS access rule |
 | --- | --- | --- | --- |
-| `profiles` | None | `SELECT`, `UPDATE (display_name, preferred_language)` | Read self or linked partner (`shares_couple_with(id)`); update self only |
-| `couples` | None | `SELECT`, `UPDATE (title)` | Read/update only if `is_couple_member(id)` |
-| `couple_members` | None | `SELECT` only | Read only rows in own couple (`is_couple_member(couple_id)`) |
-| `couple_invitations` | None | `SELECT` (all columns **except** `token_hash`) | Read only invitations for own couple (`is_couple_member(couple_id)`) |
+| `profiles` | None | `SELECT`, `UPDATE (display_name, preferred_language)` | Read self or user sharing `private.current_user_couple_id()`; update self only |
+| `couples` | None | `SELECT`, `UPDATE (title)` | Read/update only if `id = private.current_user_couple_id()` |
+| `couple_members` | None | `SELECT` only | Read only rows where `couple_id = private.current_user_couple_id()` |
+| `couple_invitations` | None | `SELECT` (all columns **except** `token_hash`) | Read only invitations where `couple_id = private.current_user_couple_id()` |
 
 `create_couple_invitation(p_ttl_hours)` generates a 32-byte random token via `extensions.gen_random_bytes(32)`, stores only its SHA-256 hex digest in `token_hash`, revokes/expires any prior pending invitation, and returns the plaintext token once to the creator.
 
@@ -50,14 +52,15 @@ All tables have `ENABLE ROW LEVEL SECURITY` and `REVOKE ALL` from `PUBLIC` and `
 
 - Bucket `couple-photos` is created/enforced with `public = false`, a 10 MiB per-file limit, and an image MIME allowlist (`image/jpeg`, `image/png`, `image/webp`, `image/heic`, `image/heif`).
 - Objects follow the path convention `couple-photos/<couple_id>/<photo_uuid>.<ext>`.
-- `storage.objects` policies allow `SELECT`, `INSERT` (`owner = auth.uid()`), `UPDATE`, and `DELETE` only for `authenticated` users where `public.is_couple_member(public.try_parse_uuid((storage.foldername(name))[1]))` is true and the path contains no `..` traversal segments.
+- `storage.objects` policies allow `SELECT`, `INSERT` (`owner = auth.uid()`), `UPDATE`, and `DELETE` only for `authenticated` users where `private.try_parse_uuid((storage.foldername(name))[1]) = (SELECT private.current_user_couple_id())` and the path contains no `..` traversal segments.
 
 ## 6. Verification & manual Supabase setup
 
-- **SQL RLS verification test**: [`supabase/tests/rls_security_verification.sql`](../supabase/tests/rls_security_verification.sql) runs inside `BEGIN ... ROLLBACK` and verifies two-member linking, unrelated user (`User C`) isolation across tables and Storage, invitation single-use/revocation/expiry, and direct-write rejection.
+- **Automated JS tests (`tests/supabaseFoundation.test.mjs`)**: verify client config validation/guards and perform static structural checks on the SQL files. **Static JS checks do not execute SQL or prove live PostgreSQL security.**
+- **SQL RLS verification test (`supabase/tests/rls_security_verification.sql`)**: runs inside `BEGIN ... ROLLBACK` with top-level `SET LOCAL ROLE authenticated;` / `RESET ROLE;` transitions and verifies two-member linking, unrelated user (`User C`) and cross-couple (`User D`) isolation across tables and all Storage CRUD verbs (`INSERT`, `SELECT`, `UPDATE`, `DELETE`), invitation single-use/revocation/expiry, two-member caps, and direct-write rejection.
 - **Manual steps once you create your Supabase project**:
   1. Create a Supabase project in the Supabase Dashboard (or start local Supabase CLI).
-  2. Apply both migrations in [`supabase/migrations/`](../supabase/migrations/) in order (`20261127000100_initial_couple_schema.sql`, then `20261127000200_private_couple_photos_storage.sql`) via Supabase CLI (`supabase db push`) or the SQL Editor.
-  3. Run [`supabase/tests/rls_security_verification.sql`](../supabase/tests/rls_security_verification.sql) against your Supabase database (`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/rls_security_verification.sql`) and confirm `ALL RLS & TWO-MEMBER SECURITY CHECKS PASSED`.
+  2. Apply both migrations in [`supabase/migrations/`](../supabase/migrations/) in order (`20261127000100_initial_couple_schema.sql`, then `20261127000200_private_couple_photos_storage.sql`).
+  3. Execute [`supabase/tests/rls_security_verification.sql`](../supabase/tests/rls_security_verification.sql) against your live Supabase PostgreSQL database (`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/rls_security_verification.sql`) and confirm `ALL RLS & TWO-MEMBER SECURITY CHECKS PASSED`.
   4. Copy `.env.example` to `.env` locally and set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (public anon/publishable key only).
   5. Configure Supabase Auth providers/redirect URLs when implementing sign-in UI in Phase 2 — Step 2.
