@@ -227,9 +227,13 @@ test('static SQL structure checks: migrations & verification script define harde
     'src/features/photos/photoService.ts',
     'src/features/photos/usePhotoLibrary.ts',
     'src/app/photos.tsx',
+    'src/app/play/memory-match.tsx',
+    'src/features/memoryMatch/MemoryCardTile.tsx',
+    'src/features/memoryMatch/gameEngine.ts',
   ]) {
     const src = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf8');
     assert.equal(/AsyncStorage|localStorage|sessionStorage/i.test(src), false);
+    assert.equal(src.includes('getPublicUrl'), false);
   }
 
   // Verify photoService uses signed URLs & Storage removal, never getPublicUrl
