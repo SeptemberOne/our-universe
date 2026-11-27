@@ -62,6 +62,10 @@ export default function HomeScreen() {
     router.push('/play/memory-match');
   }, [router]);
 
+  const handleOpenPhotoLibrary = useCallback(() => {
+    router.push('/photos');
+  }, [router]);
+
   const handleOpenCoupleSpace = useCallback(() => {
     if (isConfigured && authStatus === 'unauthenticated') {
       router.push('/auth');
@@ -153,9 +157,13 @@ export default function HomeScreen() {
 
             <View style={styles.destinationList}>
               {DESTINATIONS.map((item) => {
-                const statusLabel = item.featured
-                  ? t('home.statusNext')
-                  : t('home.statusPlanned');
+                const isInteractive = item.id === 'play' || item.id === 'memories';
+                const statusLabel =
+                  item.id === 'play'
+                    ? t('home.statusNext')
+                    : item.id === 'memories'
+                      ? t('home.statusOpen')
+                      : t('home.statusPlanned');
                 const title = t(`home.destinations.${item.id}.title`);
                 const subtitle = t(`home.destinations.${item.id}.subtitle`);
 
@@ -175,7 +183,7 @@ export default function HomeScreen() {
                       </View>
                       <OrbitBadge
                         label={statusLabel}
-                        tone={item.featured ? 'accent' : 'subtle'}
+                        tone={isInteractive ? 'accent' : 'subtle'}
                       />
                     </View>
                     <Text style={styles.cardTitle}>{title}</Text>
@@ -183,14 +191,22 @@ export default function HomeScreen() {
                   </CelestialCard>
                 );
 
-                if (item.featured) {
+                if (isInteractive) {
                   return (
                     <Pressable
                       key={item.id}
-                      onPress={handleOpenMemoryMatch}
+                      onPress={
+                        item.id === 'play'
+                          ? handleOpenMemoryMatch
+                          : handleOpenPhotoLibrary
+                      }
                       accessibilityRole="button"
                       accessibilityLabel={`${title}. ${subtitle}`}
-                      accessibilityHint={t('home.openGameHint')}
+                      accessibilityHint={
+                        item.id === 'play'
+                          ? t('home.openGameHint')
+                          : t('home.openPhotosHint')
+                      }
                       style={({ pressed }) => [pressed && styles.cardPressed]}
                     >
                       {cardContent}
