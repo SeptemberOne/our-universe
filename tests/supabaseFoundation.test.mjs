@@ -218,13 +218,25 @@ test('static SQL structure checks: migrations & verification script define harde
     false,
   );
 
-  // Verify one-time invitation tokens are never persisted to AsyncStorage or localStorage
+  // Verify one-time invitation tokens and private signed URLs are never persisted to storage
   for (const relPath of [
     'src/features/couple/CoupleContext.tsx',
     'src/features/couple/coupleService.ts',
     'src/app/couple.tsx',
+    'src/features/photos/photoService.ts',
+    'src/features/photos/usePhotoLibrary.ts',
+    'src/app/photos.tsx',
   ]) {
     const src = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf8');
     assert.equal(/AsyncStorage|localStorage|sessionStorage/i.test(src), false);
   }
+
+  // Verify photoService uses signed URLs & Storage removal, never getPublicUrl
+  const photoService = fs.readFileSync(
+    path.join(REPO_ROOT, 'src/features/photos/photoService.ts'),
+    'utf8',
+  );
+  assert.equal(photoService.includes('getPublicUrl'), false);
+  assert.match(photoService, /createSignedUrls/);
+  assert.match(photoService, /\.remove\(/);
 });

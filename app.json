@@ -18,6 +18,12 @@
       "expo-router",
       "expo-localization",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Our Universe to access your photo library so you can share private memories with your partner."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#070B1A",
