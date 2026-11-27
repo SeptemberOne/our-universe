@@ -79,4 +79,4 @@ To prevent authenticated users from probing arbitrary `couple_id` or `user_id` U
    ```
    Confirm `STORAGE API DELETE AUTHORIZATION CHECKS PASSED`.
 5. Copy `.env.example` to `.env` locally and set only `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (public anon/publishable key only).
-6. Configure Supabase Auth providers/redirect URLs when implementing sign-in UI in Phase 2 — Step 2.
+6. In the Supabase Dashboard under **Authentication → Providers → Email**, ensure Email sign-in is enabled. Optionally disable **Confirm email** during local development if you want instant sign-up without email verification; if enabled, the app displays a confirmation prompt until the user verifies their email.

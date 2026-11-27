@@ -8,6 +8,8 @@ import { CelestialBackdrop } from '@/components/CelestialBackdrop';
 import { CelestialCard } from '@/components/CelestialCard';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { OrbitBadge } from '@/components/OrbitBadge';
+import { useAuth } from '@/features/auth/AuthContext';
+import { useCouple } from '@/features/couple/CoupleContext';
 import { getAppLanguage, setAppLanguage, type AppLanguage } from '@/i18n';
 import { colors, layout, radius, spacing, typography } from '@/theme/tokens';
 
@@ -43,6 +45,8 @@ function CelestialEmblem() {
 export default function HomeScreen() {
   const { t, i18n } = useTranslation();
   const router = useRouter();
+  const { isConfigured, status: authStatus } = useAuth();
+  const { snapshot } = useCouple();
   const currentLanguage: AppLanguage = getAppLanguage();
 
   const handleSelectLanguage = useCallback(
@@ -57,6 +61,32 @@ export default function HomeScreen() {
   const handleOpenMemoryMatch = useCallback(() => {
     router.push('/play/memory-match');
   }, [router]);
+
+  const handleOpenCoupleSpace = useCallback(() => {
+    if (isConfigured && authStatus === 'unauthenticated') {
+      router.push('/auth');
+    } else {
+      router.push('/couple');
+    }
+  }, [authStatus, isConfigured, router]);
+
+  const coupleBadgeLabel = !isConfigured
+    ? t('home.coupleCard.badgeLocal')
+    : snapshot?.isCoupleFull
+      ? t('home.coupleCard.badgeConnected')
+      : snapshot?.couple
+        ? t('home.coupleCard.badgeWaiting')
+        : t('home.coupleCard.badgeSetup');
+
+  const coupleTitle = snapshot?.couple?.title ?? t('home.coupleCard.titleFallback');
+
+  const coupleSubtitle = !isConfigured
+    ? t('home.coupleCard.subtitleLocal')
+    : snapshot?.isCoupleFull
+      ? t('home.coupleCard.subtitleConnected')
+      : snapshot?.couple
+        ? t('home.coupleCard.subtitleWaiting')
+        : t('home.coupleCard.subtitleSetup');
 
   return (
     <View style={styles.root}>
@@ -84,6 +114,36 @@ export default function HomeScreen() {
               <Text style={styles.heroTagline}>{t('app.tagline')}</Text>
               <Text style={styles.heroBody}>{t('home.welcomeBody')}</Text>
             </View>
+
+            <Pressable
+              onPress={handleOpenCoupleSpace}
+              accessibilityRole="button"
+              accessibilityLabel={`${coupleTitle}. ${coupleSubtitle}`}
+              accessibilityHint={t('home.coupleCard.hint')}
+              style={({ pressed }) => [
+                styles.coupleCardPressable,
+                pressed && styles.cardPressed,
+              ]}
+            >
+              <CelestialCard highlighted={Boolean(snapshot?.isCoupleFull)}>
+                <View style={styles.cardHeader}>
+                  <View
+                    style={[styles.symbolBadge, { borderColor: colors.accent.rose }]}
+                    accessibilityElementsHidden
+                  >
+                    <Text style={[styles.symbolText, { color: colors.accent.rose }]}>
+                      ♡
+                    </Text>
+                  </View>
+                  <OrbitBadge
+                    label={coupleBadgeLabel}
+                    tone={snapshot?.isCoupleFull ? 'accent' : 'subtle'}
+                  />
+                </View>
+                <Text style={styles.cardTitle}>{coupleTitle}</Text>
+                <Text style={styles.cardSubtitle}>{coupleSubtitle}</Text>
+              </CelestialCard>
+            </Pressable>
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle} accessibilityRole="header">
@@ -260,6 +320,9 @@ const styles = StyleSheet.create({
   },
   destinationList: {
     gap: spacing.md,
+  },
+  coupleCardPressable: {
+    marginBottom: spacing.xl,
   },
   cardPressed: {
     opacity: 0.88,

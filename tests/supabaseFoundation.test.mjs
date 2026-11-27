@@ -203,4 +203,18 @@ test('static SQL structure checks: migrations & verification script define harde
   );
   assert.match(storageDeleteScript, /\.storage\.from\('couple-photos'\)\.remove\(/);
   assert.equal(/DELETE FROM storage\.objects/i.test(storageDeleteScript), false);
+
+  // Verify coupleService never selects token_hash or performs direct membership/invitation writes
+  const coupleService = fs.readFileSync(
+    path.join(REPO_ROOT, 'src/features/couple/coupleService.ts'),
+    'utf8',
+  );
+  assert.equal(/\.select\([^)]*token_hash/i.test(coupleService), false);
+  assert.equal(/\.select\(\s*['"]\*['"]\s*\)/.test(coupleService), false);
+  assert.equal(
+    /\.from\(\s*['"]couple_(members|invitations)['"]\s*\)\s*\.\s*(insert|update|delete|upsert)\(/s.test(
+      coupleService,
+    ),
+    false,
+  );
 });
