@@ -71,4 +71,5 @@ For every phase:
 - [x] GitHub repository created and accessible.
 - [x] Product direction and initial requirements documented.
 - [x] Phase 0: runnable Expo foundation.
-- [ ] Phase 1: first playable game (Photo Memory Match).
+- [x] Phase 1: first playable game (Photo Memory Match).
+- [ ] Phase 2: Supabase foundation and private couple space.

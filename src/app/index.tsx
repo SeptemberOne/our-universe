@@ -1,6 +1,7 @@
+import { useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CelestialBackdrop } from '@/components/CelestialBackdrop';
@@ -41,6 +42,7 @@ function CelestialEmblem() {
 
 export default function HomeScreen() {
   const { t, i18n } = useTranslation();
+  const router = useRouter();
   const currentLanguage: AppLanguage = getAppLanguage();
 
   const handleSelectLanguage = useCallback(
@@ -51,6 +53,10 @@ export default function HomeScreen() {
     },
     [i18n.language],
   );
+
+  const handleOpenMemoryMatch = useCallback(() => {
+    router.push('/play/memory-match');
+  }, [router]);
 
   return (
     <View style={styles.root}>
@@ -90,9 +96,11 @@ export default function HomeScreen() {
                 const statusLabel = item.featured
                   ? t('home.statusNext')
                   : t('home.statusPlanned');
+                const title = t(`home.destinations.${item.id}.title`);
+                const subtitle = t(`home.destinations.${item.id}.subtitle`);
 
-                return (
-                  <CelestialCard key={item.id} highlighted={item.featured}>
+                const cardContent = (
+                  <CelestialCard highlighted={item.featured}>
                     <View style={styles.cardHeader}>
                       <View
                         style={[
@@ -110,14 +118,27 @@ export default function HomeScreen() {
                         tone={item.featured ? 'accent' : 'subtle'}
                       />
                     </View>
-                    <Text style={styles.cardTitle}>
-                      {t(`home.destinations.${item.id}.title`)}
-                    </Text>
-                    <Text style={styles.cardSubtitle}>
-                      {t(`home.destinations.${item.id}.subtitle`)}
-                    </Text>
+                    <Text style={styles.cardTitle}>{title}</Text>
+                    <Text style={styles.cardSubtitle}>{subtitle}</Text>
                   </CelestialCard>
                 );
+
+                if (item.featured) {
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={handleOpenMemoryMatch}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${title}. ${subtitle}`}
+                      accessibilityHint={t('home.openGameHint')}
+                      style={({ pressed }) => [pressed && styles.cardPressed]}
+                    >
+                      {cardContent}
+                    </Pressable>
+                  );
+                }
+
+                return <View key={item.id}>{cardContent}</View>;
               })}
             </View>
 
@@ -239,6 +260,10 @@ const styles = StyleSheet.create({
   },
   destinationList: {
     gap: spacing.md,
+  },
+  cardPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.99 }],
   },
   cardHeader: {
     flexDirection: 'row',
