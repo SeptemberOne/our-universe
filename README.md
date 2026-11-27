@@ -15,6 +15,7 @@ Our Universe is a private, shared iPhone experience for two people: photo games,
 - [Agent instructions](AGENTS.md)
 - [Product specification](docs/PRODUCT_SPEC.md)
 - [Development plan](docs/DEVELOPMENT_PLAN.md)
+- [Supabase foundation & security](docs/SUPABASE_FOUNDATION.md)
 
 ## Planned technology
 - React Native + Expo + TypeScript
@@ -33,9 +34,11 @@ The Phase 0 foundation is a local-only Expo + React Native + TypeScript applicat
 - `src/components/` — Small reusable UI primitives (`CelestialBackdrop`, `CelestialCard`, `LanguageToggle`, `OrbitBadge`).
 - `src/i18n/` — `i18next` / `react-i18next` configuration, English (`en`) and Simplified Chinese (`zh-CN`) translations, device-locale detection, and local language preference persistence.
 - `src/theme/` — Celestial design tokens (midnight/indigo surfaces, nebula accents, typography, spacing, and iOS touch-target minimums).
+- `src/lib/supabase/` — Environment-configured Supabase client, config validation (blocking `service_role` keys), and generated database types.
+- `supabase/migrations/` — Version-controlled PostgreSQL schema, two-member enforcement, RLS policies, and private `couple-photos` Storage bucket setup.
 - `assets/images/` — Placeholder app icon, splash screen, and favicon assets (no personal photographs).
 
-Backend integration (Supabase Auth, Postgres, private Storage, and RLS) is intentionally deferred until Phase 2, so no environment variables or `.env.example` file are required yet.
+See [the Supabase foundation guide](docs/SUPABASE_FOUNDATION.md) for schema details and manual Supabase setup steps. Copy `.env.example` to `.env` only when connecting a Supabase project (keep `.env` untracked and never put a `service_role` key in the app).
 
 ## Local development
 
