@@ -129,7 +129,8 @@ async function main() {
     assert.ok(couple2Id && couple2Id !== couple1Id);
 
     // 2. User A uploads synthetic 1x1 PNG into couple_1 folder via Storage API.
-    const photoPath = `${couple1Id}/storage-delete-verification-${crypto.randomUUID()}.png`;
+    const fileName = `storage-delete-verification-${crypto.randomUUID()}.png`;
+    const photoPath = `${couple1Id}/${fileName}`;
     const { error: uploadErr } = await clientA.storage
       .from('couple-photos')
       .upload(photoPath, SYNTHETIC_1X1_PNG, {
@@ -171,8 +172,16 @@ async function main() {
     );
     deletedViaApi = true;
 
-    const afterMemberDelete = await clientA.storage.from('couple-photos').download(photoPath);
-    assert.notEqual(afterMemberDelete.error, null, 'Expected photo download to fail after legitimate Storage DELETE');
+    const { data: listedFiles, error: listErr } = await clientA.storage
+      .from('couple-photos')
+      .list(couple1Id, { limit: 100, search: fileName });
+    assert.equal(listErr, null, `Post-delete folder list failed: ${listErr?.message}`);
+    assert.ok(Array.isArray(listedFiles), 'Expected folder list array after Storage DELETE');
+    assert.equal(
+      listedFiles.some((entry) => entry.name === fileName),
+      false,
+      `Expected ${fileName} to be absent from couple_1 folder after Storage DELETE`,
+    );
 
     console.log('STORAGE API DELETE AUTHORIZATION CHECKS PASSED');
   } finally {
