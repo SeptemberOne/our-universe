@@ -72,4 +72,4 @@ For every phase:
 - [x] Product direction and initial requirements documented.
 - [x] Phase 0: runnable Expo foundation.
 - [x] Phase 1: first playable game (Photo Memory Match).
-- [ ] Phase 2: Supabase foundation and private couple space.
+- [x] Phase 2: Supabase foundation and private couple space (schema, RLS, Auth & couple linking UI).
