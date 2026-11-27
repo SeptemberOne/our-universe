@@ -1,11 +1,17 @@
 import type {
   FlipResult,
-  MemoryArtworkId,
   MemoryCardState,
   MemoryGameState,
+  MemoryPairId,
+  PhotoGameRoundResult,
+  PhotoPairCandidate,
+  RoundPhotoSelectionResult,
 } from './types';
 
 export type RandomFn = () => number;
+
+export const MIN_MEMORY_PAIRS = 2;
+export const MAX_MEMORY_PAIRS = 6;
 
 function normalizeRandom(value: number): number {
   if (!Number.isFinite(value) || value < 0) {
@@ -15,6 +21,19 @@ function normalizeRandom(value: number): number {
     return 1 - Number.EPSILON;
   }
   return value;
+}
+
+function sanitizePairIds(pairIds: readonly MemoryPairId[]): MemoryPairId[] {
+  const unique: MemoryPairId[] = [];
+  const seen = new Set<MemoryPairId>();
+  for (const pairId of pairIds) {
+    if (pairId.trim().length === 0 || seen.has(pairId)) {
+      continue;
+    }
+    seen.add(pairId);
+    unique.push(pairId);
+  }
+  return unique;
 }
 
 export function shuffleArray<T>(items: readonly T[], randomFn: RandomFn = Math.random): T[] {
@@ -31,11 +50,64 @@ export function shuffleArray<T>(items: readonly T[], randomFn: RandomFn = Math.r
   return result;
 }
 
+/**
+ * Filter candidate couple photos down to unique, playable storage paths that have
+ * an active signed URL in memory.
+ */
+export function extractPlayablePhotoPairIds(
+  photos: readonly PhotoPairCandidate[],
+): MemoryPairId[] {
+  const uniquePaths: MemoryPairId[] = [];
+  const seen = new Set<MemoryPairId>();
+  for (const photo of photos) {
+    if (photo.path.trim().length === 0 || photo.signedUrl.trim().length === 0) {
+      continue;
+    }
+    if (seen.has(photo.path)) {
+      continue;
+    }
+    seen.add(photo.path);
+    uniquePaths.push(photo.path);
+  }
+  return uniquePaths;
+}
+
+/**
+ * Select between `minPairs` and `maxPairs` unique photo identifiers for a round.
+ * When more than `maxPairs` are available, randomly choose `maxPairs` items.
+ */
+export function selectRoundPairIds(
+  pairIds: readonly MemoryPairId[],
+  randomFn: RandomFn = Math.random,
+  options?: {
+    readonly minPairs?: number;
+    readonly maxPairs?: number;
+  },
+): RoundPhotoSelectionResult {
+  const minPairs = Math.max(1, options?.minPairs ?? MIN_MEMORY_PAIRS);
+  const maxPairs = Math.max(minPairs, options?.maxPairs ?? MAX_MEMORY_PAIRS);
+  const unique = sanitizePairIds(pairIds);
+
+  if (unique.length === 0) {
+    return { ok: false, reason: 'empty', availableCount: 0 };
+  }
+  if (unique.length < minPairs) {
+    return { ok: false, reason: 'insufficient', availableCount: unique.length };
+  }
+  if (unique.length > maxPairs) {
+    return {
+      ok: true,
+      pairIds: shuffleArray(unique, randomFn).slice(0, maxPairs),
+    };
+  }
+  return { ok: true, pairIds: unique };
+}
+
 export function createDeck(
-  pairIds: readonly MemoryArtworkId[],
+  pairIds: readonly MemoryPairId[],
   randomFn: RandomFn = Math.random,
 ): MemoryCardState[] {
-  const uniquePairIds = Array.from(new Set(pairIds));
+  const uniquePairIds = sanitizePairIds(pairIds);
   const unshuffled: MemoryCardState[] = [];
   for (const pairId of uniquePairIds) {
     unshuffled.push(
@@ -57,10 +129,10 @@ export function createDeck(
 }
 
 export function createInitialGameState(
-  pairIds: readonly MemoryArtworkId[],
+  pairIds: readonly MemoryPairId[],
   randomFn: RandomFn = Math.random,
 ): MemoryGameState {
-  const uniquePairIds = Array.from(new Set(pairIds));
+  const uniquePairIds = sanitizePairIds(pairIds);
   return {
     cards: createDeck(uniquePairIds, randomFn),
     selectedCardIds: [],
@@ -69,6 +141,25 @@ export function createInitialGameState(
     matchedPairs: 0,
     totalPairs: uniquePairIds.length,
     status: 'idle',
+  };
+}
+
+/**
+ * Create a new shuffled Photo Memory Match round using up to six distinct couple photos.
+ */
+export function createPhotoGameRound(
+  photos: readonly PhotoPairCandidate[],
+  randomFn: RandomFn = Math.random,
+): PhotoGameRoundResult {
+  const playableIds = extractPlayablePhotoPairIds(photos);
+  const selection = selectRoundPairIds(playableIds, randomFn);
+  if (!selection.ok) {
+    return selection;
+  }
+  return {
+    ok: true,
+    pairIds: selection.pairIds,
+    state: createInitialGameState(selection.pairIds, randomFn),
   };
 }
 
@@ -189,4 +280,34 @@ export function formatElapsedTime(totalSeconds: number): string {
   const minutes = Math.floor(safeSeconds / 60);
   const seconds = safeSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export interface FocusRefreshPolicyInput {
+  readonly wasBlurred: boolean;
+  readonly isConfigured: boolean;
+  readonly isAuthenticated: boolean;
+  readonly hasCouple: boolean;
+  readonly photoStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  readonly playablePhotoCount: number;
+}
+
+/**
+ * Refresh couple photos on screen focus only after a real blur->focus transition
+ * when the deck could not previously start (< 2 photos or load error).
+ * Returning to or updating state within an already playable game never regenerates signed URLs.
+ */
+export function shouldRefreshPhotoLibraryOnFocus(
+  input: FocusRefreshPolicyInput,
+): boolean {
+  if (
+    !input.wasBlurred ||
+    !input.isConfigured ||
+    !input.isAuthenticated ||
+    !input.hasCouple ||
+    input.photoStatus === 'loading'
+  ) {
+    return false;
+  }
+
+  return input.playablePhotoCount < MIN_MEMORY_PAIRS || input.photoStatus === 'error';
 }

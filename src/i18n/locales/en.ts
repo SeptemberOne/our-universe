@@ -54,11 +54,36 @@ export const en = {
   memoryMatch: {
     title: 'Photo Memory Match',
     sampleBadge: 'Sample celestial deck · Offline',
+    sharedBadge: 'Shared couple photos',
     instruction: 'Tap two starlight cards to uncover each matching pair.',
+    sharedInstruction: 'Tap two starlight cards to match your shared memories.',
     backLabel: 'Back',
     backAccessibility: 'Back to Our Universe home',
     resetLabel: 'New Game',
     resetAccessibility: 'Shuffle a new memory match deck',
+    loading: 'Gathering your shared memories for a new round…',
+    loadErrorTitle: 'Could not load your shared photos',
+    retryLabel: 'Try Again',
+    refreshLabel: 'Refresh Photos',
+    openPhotosLabel: 'Go to Photo Library',
+    goToCoupleLabel: 'Go to Couple Space',
+    empty: {
+      title: 'No shared photos yet',
+      body: 'Upload at least 2 photos to your private Photo Library to play Photo Memory Match with your own memories.',
+    },
+    insufficient: {
+      title: 'Add one more photo to play',
+      body: 'You currently have {{count}} shared photo. Upload at least 2 photos in your Photo Library to start a round.',
+    },
+    noCouple: {
+      title: 'Link your couple space first',
+      body: 'Create or join your private two-person space before playing with shared photos.',
+    },
+    imageError: {
+      cardLabel: 'Photo unavailable',
+      bannerText: 'One or more private photo links could not load. Reload your photo library to refresh them.',
+      reloadLabel: 'Reload Photos',
+    },
     stats: {
       moves: 'Moves',
       pairs: 'Pairs',
@@ -67,6 +92,7 @@ export const en = {
     card: {
       hiddenLabel: 'Face-down starlight card',
       hiddenHint: 'Double tap to reveal this card',
+      photoName: 'Shared memory {{number}}',
       revealedLabel: '{{name}}, revealed',
       matchedLabel: '{{name}}, matched pair',
     },
@@ -74,6 +100,7 @@ export const en = {
       badge: 'Constellation Complete',
       title: 'Every memory aligned',
       subtitle: 'You matched all {{total}} celestial pairs together.',
+      photoSubtitle: 'You matched all {{total}} shared photo pairs together.',
       playAgain: 'Play Again',
       backHome: 'Back to Universe',
     },

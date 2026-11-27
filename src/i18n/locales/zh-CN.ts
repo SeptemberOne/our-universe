@@ -55,11 +55,36 @@ export const zhCN: TranslationSchema = {
   memoryMatch: {
     title: '照片记忆翻牌',
     sampleBadge: '星海示例卡组 · 离线可玩',
+    sharedBadge: '双人共享相册',
     instruction: '轻点两张星光卡片，找出所有成对的星海图案。',
+    sharedInstruction: '轻点两张星光卡片，配对属于你们的共同照片。',
     backLabel: '返回',
     backAccessibility: '返回我们的宇宙首页',
     resetLabel: '重新开始',
     resetAccessibility: '重新洗牌并开始新一局',
+    loading: '正在准备你们的共享回忆照片…',
+    loadErrorTitle: '无法加载共享照片',
+    retryLabel: '重试',
+    refreshLabel: '刷新照片',
+    openPhotosLabel: '前往共享相册',
+    goToCoupleLabel: '前往双人空间',
+    empty: {
+      title: '还没有上传共享照片',
+      body: '请先在私密共享相册中至少上传 2 张照片，即可用你们的回忆开启翻牌游戏。',
+    },
+    insufficient: {
+      title: '再上传一张照片即可开玩',
+      body: '当前已有 {{count}} 张共享照片。请前往共享相册至少上传 2 张照片，即可开始新一局。',
+    },
+    noCouple: {
+      title: '请先连接双人空间',
+      body: '请先创建或加入你们的私密双人空间，再使用共享照片游玩。',
+    },
+    imageError: {
+      cardLabel: '照片暂不可用',
+      bannerText: '部分私密照片链接加载失败，请刷新相册以重新获取。',
+      reloadLabel: '重新加载照片',
+    },
     stats: {
       moves: '步数',
       pairs: '已配对',
@@ -68,6 +93,7 @@ export const zhCN: TranslationSchema = {
     card: {
       hiddenLabel: '背面朝上的星光卡片',
       hiddenHint: '轻点翻开这张卡片',
+      photoName: '共同回忆 {{number}}',
       revealedLabel: '{{name}}，已翻开',
       matchedLabel: '{{name}}，已配对',
     },
@@ -75,6 +101,7 @@ export const zhCN: TranslationSchema = {
       badge: '星图已点亮',
       title: '所有回忆都已相连',
       subtitle: '你们一起完成了全部 {{total}} 组星海配对。',
+      photoSubtitle: '你们一起完成了全部 {{total}} 组共同照片配对。',
       playAgain: '再玩一局',
       backHome: '回到宇宙首页',
     },
