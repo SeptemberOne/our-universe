@@ -217,4 +217,14 @@ test('static SQL structure checks: migrations & verification script define harde
     ),
     false,
   );
+
+  // Verify one-time invitation tokens are never persisted to AsyncStorage or localStorage
+  for (const relPath of [
+    'src/features/couple/CoupleContext.tsx',
+    'src/features/couple/coupleService.ts',
+    'src/app/couple.tsx',
+  ]) {
+    const src = fs.readFileSync(path.join(REPO_ROOT, relPath), 'utf8');
+    assert.equal(/AsyncStorage|localStorage|sessionStorage/i.test(src), false);
+  }
 });

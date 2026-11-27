@@ -33,7 +33,14 @@ import { colors, layout, radius, spacing, typography } from '@/theme/tokens';
 export default function CoupleSpaceScreen() {
   const { t, i18n } = useTranslation();
   const router = useRouter();
-  const { isConfigured, status: authStatus, user, signOut } = useAuth();
+  const {
+    isConfigured,
+    status: authStatus,
+    user,
+    profileSetupWarningKey,
+    dismissProfileSetupWarning,
+    signOut,
+  } = useAuth();
   const {
     status: coupleStatus,
     snapshot,
@@ -205,6 +212,7 @@ export default function CoupleSpaceScreen() {
       const result = await saveDisplayName(validation.displayName);
       if (result.ok) {
         setDisplayNameDraft(null);
+        dismissProfileSetupWarning();
         setActionSuccess(t('couple.profile.savedSuccess'));
       } else {
         setActionError(t(`couple.errors.${result.errorKey}`));
@@ -212,7 +220,7 @@ export default function CoupleSpaceScreen() {
     } finally {
       setBusyAction(null);
     }
-  }, [displayNameInput, saveDisplayName, t]);
+  }, [dismissProfileSetupWarning, displayNameInput, saveDisplayName, t]);
 
   const couple = snapshot?.couple ?? null;
   const canNavigateHome = !isConfigured || Boolean(couple);
@@ -288,6 +296,16 @@ export default function CoupleSpaceScreen() {
               {actionError ? (
                 <View style={styles.errorBanner} accessibilityLiveRegion="polite">
                   <Text style={styles.errorText}>{actionError}</Text>
+                </View>
+              ) : null}
+
+              {profileSetupWarningKey ? (
+                <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+                  <Text style={styles.errorText}>
+                    {t('couple.profile.initialSaveWarning', {
+                      reason: t(`auth.errors.${profileSetupWarningKey}`),
+                    })}
+                  </Text>
                 </View>
               ) : null}
 
@@ -491,7 +509,11 @@ export default function CoupleSpaceScreen() {
                       </CelestialCard>
                     </View>
                   ) : null}
+                </View>
+              )}
 
+              {isConfigured && authStatus === 'authenticated' && snapshot ? (
+                <View style={[styles.sectionStack, styles.profileSection]}>
                   <Text style={styles.sectionTitle} accessibilityRole="header">
                     {t('couple.profile.heading')}
                   </Text>
@@ -513,7 +535,7 @@ export default function CoupleSpaceScreen() {
                     />
                   </CelestialCard>
                 </View>
-              )}
+              ) : null}
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -591,6 +613,9 @@ const styles = StyleSheet.create({
   },
   sectionStack: {
     gap: spacing.md,
+  },
+  profileSection: {
+    marginTop: spacing.xl,
   },
   sectionTitle: {
     ...typography.sectionTitle,

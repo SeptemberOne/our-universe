@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  applyAuthStateChange,
+  applyInitialSessionResult,
+  applyRetryHydration,
+  createInitialAuthState,
+} from '../src/features/auth/authState.ts';
 import { resolveProtectedRoute } from '../src/features/auth/routeGuard.ts';
+import { executeSignUpWithClient } from '../src/features/auth/signUpFlow.ts';
 import { mapAuthErrorToKey, validateAuthInput } from '../src/features/auth/validation.ts';
 import {
   assembleCoupleSnapshot,
@@ -10,6 +17,10 @@ import {
   validateDisplayName,
   validateInviteToken,
 } from '../src/features/couple/coupleLogic.ts';
+import {
+  applyLoadedSnapshotToState,
+  createScopedRequestTracker,
+} from '../src/features/couple/coupleStateGuard.ts';
 
 test('validateAuthInput validates email, password, and display name for signIn and signUp', () => {
   assert.deepEqual(
@@ -296,4 +307,219 @@ test('mapCoupleRpcErrorToKey maps all PostgreSQL RPC error codes accurately', ()
   assert.equal(mapCoupleRpcErrorToKey('not_authorized'), 'notAuthorized');
   assert.equal(mapCoupleRpcErrorToKey('Failed to fetch'), 'networkError');
   assert.equal(mapCoupleRpcErrorToKey('unexpected'), 'unknown');
+});
+
+test('AuthContext hydration preserves error state instead of redirecting to /auth on failure', () => {
+  const initial = createInitialAuthState(true);
+  assert.equal(initial.status, 'loading');
+
+  // Issue 1: failed getInitialSession() enters recoverable error state, not unauthenticated
+  const failed = applyInitialSessionResult(initial, { ok: false, errorKey: 'networkError' });
+  assert.equal(failed.status, 'error');
+  assert.equal(failed.errorKey, 'networkError');
+  assert.equal(failed.session, null);
+  assert.equal(
+    resolveProtectedRoute({
+      isSupabaseConfigured: true,
+      authStatus: failed.status,
+      coupleStatus: 'idle',
+      hasCouple: false,
+      pathname: '/',
+    }),
+    null,
+  );
+
+  // Retrying resets to loading, then genuine empty session resolves to unauthenticated
+  const retrying = applyRetryHydration(failed);
+  assert.equal(retrying.status, 'loading');
+  assert.equal(retrying.errorKey, null);
+
+  const missingSession = applyInitialSessionResult(retrying, { ok: true, data: null });
+  assert.equal(missingSession.status, 'unauthenticated');
+  assert.equal(
+    resolveProtectedRoute({
+      isSupabaseConfigured: true,
+      authStatus: missingSession.status,
+      coupleStatus: 'idle',
+      hasCouple: false,
+      pathname: '/',
+    }),
+    '/auth',
+  );
+
+  // Live auth event overrides older failed hydration and never gets clobbered by stale getSession()
+  const loadingAgain = createInitialAuthState(true);
+  const liveSignedIn = applyAuthStateChange(loadingAgain, { user: { id: 'user-a' } });
+  assert.equal(liveSignedIn.status, 'authenticated');
+  assert.equal(liveSignedIn.sessionGeneration, 1);
+
+  const afterStaleFail = applyInitialSessionResult(liveSignedIn, {
+    ok: false,
+    errorKey: 'networkError',
+  });
+  assert.equal(afterStaleFail.status, 'authenticated');
+  assert.equal(afterStaleFail.session?.user.id, 'user-a');
+});
+
+test('CoupleContext request tracker and state scoping prevent cross-user races and clear tokens', () => {
+  const tracker = createScopedRequestTracker();
+
+  // User A session 1 starts an initial load and a refresh
+  tracker.setActiveScope('user-a:1');
+  const firstToken = tracker.beginRequest('user-a:1');
+  const refreshToken = tracker.beginRequest('user-a:1');
+  assert.equal(tracker.isCurrent(firstToken), false);
+  assert.equal(tracker.isCurrent(refreshToken), true);
+
+  // User signs out before refresh completes -> in-flight response must be ignored
+  tracker.setActiveScope(null);
+  assert.equal(tracker.isCurrent(refreshToken), false);
+  assert.equal(tracker.isActiveScope('user-a:1'), false);
+
+  // User B signs in while User A's request was in flight
+  tracker.setActiveScope('user-b:2');
+  const userBToken = tracker.beginRequest('user-b:2');
+  assert.equal(tracker.isCurrent(refreshToken), false);
+  assert.equal(tracker.isCurrent(userBToken), true);
+
+  // Issue 3: one-time invitation token survives same-session waiting reload, clears on switch/full
+  const waitingSnapshot = assembleCoupleSnapshot({
+    userId: 'user-a',
+    couple: { id: 'c1', title: 'Home', createdBy: 'user-a', createdAt: '2026-11-27T00:00:00Z' },
+    members: [
+      { coupleId: 'c1', userId: 'user-a', memberSlot: 1, role: 'creator', joinedAt: '2026-11-27T00:00:00Z' },
+    ],
+    profiles: [],
+    invitations: [],
+  });
+  const withToken = {
+    scopeKey: 'user-a:1',
+    status: 'loaded',
+    snapshot: waitingSnapshot,
+    errorKey: null,
+    generatedInvitation: {
+      invitationId: 'inv-1',
+      inviteToken: 'one-time-secret-token',
+      expiresAt: '2026-11-28T00:00:00Z',
+    },
+  };
+
+  // Same session reload while still 1/2 waiting preserves shareable token
+  const reloadedSameSession = applyLoadedSnapshotToState(withToken, 'user-a:1', waitingSnapshot);
+  assert.equal(reloadedSameSession.generatedInvitation?.inviteToken, 'one-time-secret-token');
+
+  // Re-sign-in or user switch changes scopeKey -> token is cleared
+  const newSessionState = applyLoadedSnapshotToState(withToken, 'user-a:2', waitingSnapshot);
+  assert.equal(newSessionState.generatedInvitation, null);
+
+  // Couple becoming 2/2 full clears the token immediately
+  const fullSnapshot = assembleCoupleSnapshot({
+    userId: 'user-a',
+    couple: { id: 'c1', title: 'Home', createdBy: 'user-a', createdAt: '2026-11-27T00:00:00Z' },
+    members: [
+      { coupleId: 'c1', userId: 'user-a', memberSlot: 1, role: 'creator', joinedAt: '2026-11-27T00:00:00Z' },
+      { coupleId: 'c1', userId: 'user-b', memberSlot: 2, role: 'partner', joinedAt: '2026-11-27T01:00:00Z' },
+    ],
+    profiles: [],
+    invitations: [],
+  });
+  const afterPartnerJoined = applyLoadedSnapshotToState(withToken, 'user-a:1', fullSnapshot);
+  assert.equal(afterPartnerJoined.generatedInvitation, null);
+});
+
+test('executeSignUpWithClient surfaces profile update errors without losing created Auth session', async () => {
+  const session = { user: { id: 'user-new' } };
+
+  // 1. Profile update returns Supabase error -> reports partial failure with session preserved
+  const profileErrorResult = await executeSignUpWithClient(
+    {
+      signUp: async () => ({ session }),
+      updateDisplayName: async () => ({ errorMessage: 'network timeout' }),
+      mapError: mapAuthErrorToKey,
+    },
+    {
+      email: 'new@example.com',
+      password: 'password123',
+      displayName: 'Luna',
+      preferredLanguage: 'en',
+    },
+  );
+  assert.deepEqual(profileErrorResult, {
+    ok: true,
+    data: {
+      status: 'signed-in-profile-update-failed',
+      session,
+      profileErrorKey: 'networkError',
+    },
+  });
+
+  // 2. Profile update throws -> caught safely and reported with session preserved
+  const profileThrowResult = await executeSignUpWithClient(
+    {
+      signUp: async () => ({ session }),
+      updateDisplayName: async () => {
+        throw new Error('Failed to fetch');
+      },
+      mapError: mapAuthErrorToKey,
+    },
+    {
+      email: 'new@example.com',
+      password: 'password123',
+      displayName: 'Luna',
+      preferredLanguage: 'zh-CN',
+    },
+  );
+  assert.deepEqual(profileThrowResult, {
+    ok: true,
+    data: {
+      status: 'signed-in-profile-update-failed',
+      session,
+      profileErrorKey: 'networkError',
+    },
+  });
+
+  // 3. Blank display name skips profile update and reports complete signed-in success
+  let updateCalled = false;
+  const blankNameResult = await executeSignUpWithClient(
+    {
+      signUp: async () => ({ session }),
+      updateDisplayName: async () => {
+        updateCalled = true;
+        return {};
+      },
+      mapError: mapAuthErrorToKey,
+    },
+    {
+      email: 'new@example.com',
+      password: 'password123',
+      displayName: '   ',
+      preferredLanguage: 'en',
+    },
+  );
+  assert.equal(updateCalled, false);
+  assert.deepEqual(blankNameResult, {
+    ok: true,
+    data: { status: 'signed-in', session },
+  });
+
+  // 4. Email confirmation required does not attempt profile update
+  const confirmResult = await executeSignUpWithClient(
+    {
+      signUp: async () => ({ session: null }),
+      updateDisplayName: async () => {
+        throw new Error('Should not run without session');
+      },
+      mapError: mapAuthErrorToKey,
+    },
+    {
+      email: 'new@example.com',
+      password: 'password123',
+      displayName: 'Luna',
+      preferredLanguage: 'en',
+    },
+  );
+  assert.deepEqual(confirmResult, {
+    ok: true,
+    data: { status: 'confirmation-required' },
+  });
 });

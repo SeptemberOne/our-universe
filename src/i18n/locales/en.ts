@@ -89,6 +89,10 @@ export const en = {
     title: 'Step into Our Universe',
     subtitle: 'Sign in or create your account to link your private two-person space.',
     loadingSession: 'Checking your celestial session…',
+    sessionError: {
+      title: 'Could not verify your session',
+      retry: 'Try Again',
+    },
     tabs: {
       signIn: 'Sign In',
       signUp: 'Create Account',
@@ -203,6 +207,7 @@ export const en = {
       placeholder: 'Enter a name your partner will see',
       save: 'Save Display Name',
       savedSuccess: 'Display name updated.',
+      initialSaveWarning: 'Your account was created, but we could not save your initial display name ({{reason}}). You can save it below.',
     },
     validation: {
       titleTooLong: 'Space name must be 80 characters or fewer.',

@@ -1,4 +1,4 @@
-export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
+export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 export type CoupleLoadStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
 export interface RouteGuardInput {
@@ -12,7 +12,11 @@ export interface RouteGuardInput {
 export type GuardRedirectTarget = '/auth' | '/couple' | '/' | null;
 
 export function resolveProtectedRoute(input: RouteGuardInput): GuardRedirectTarget {
-  if (!input.isSupabaseConfigured || input.authStatus === 'loading') {
+  if (
+    !input.isSupabaseConfigured ||
+    input.authStatus === 'loading' ||
+    input.authStatus === 'error'
+  ) {
     return null;
   }
 

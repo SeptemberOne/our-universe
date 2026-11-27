@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -19,6 +20,11 @@ import {
   updateOwnDisplayName,
   type CoupleServiceResult,
 } from './coupleService';
+import {
+  applyLoadedSnapshotToState,
+  createScopedRequestTracker,
+  type ScopedCoupleState,
+} from './coupleStateGuard';
 import type { CoupleErrorKey, CoupleSnapshot, GeneratedInvitation } from './types';
 
 interface CoupleContextValue {
@@ -35,164 +41,202 @@ interface CoupleContextValue {
   readonly clearGeneratedInvitation: () => void;
 }
 
-interface ScopedCoupleState {
-  readonly userId: string;
-  readonly status: CoupleLoadStatus;
-  readonly snapshot: CoupleSnapshot | null;
-  readonly errorKey: CoupleErrorKey | null;
-  readonly generatedInvitation: GeneratedInvitation | null;
-}
+type CoupleState = ScopedCoupleState<GeneratedInvitation, CoupleErrorKey>;
 
 const CoupleContext = createContext<CoupleContextValue | null>(null);
 
 export function CoupleProvider({ children }: { readonly children: ReactNode }) {
-  const { isConfigured, status: authStatus, user } = useAuth();
+  const { isConfigured, status: authStatus, user, sessionGeneration } = useAuth();
   const activeUserId = isConfigured && authStatus === 'authenticated' ? (user?.id ?? null) : null;
+  const activeScopeKey = activeUserId ? `${activeUserId}:${sessionGeneration}` : null;
 
-  const [scopedState, setScopedState] = useState<ScopedCoupleState | null>(null);
+  const [scopedState, setScopedState] = useState<CoupleState | null>(null);
+  const trackerRef = useRef(createScopedRequestTracker());
 
-  const loadForUser = useCallback(async (userId: string) => {
+  const loadForScope = useCallback(async (userId: string, scopeKey: string) => {
+    const token = trackerRef.current.beginRequest(scopeKey);
+    if (!token) {
+      return;
+    }
+
     setScopedState((prev) => ({
-      userId,
+      scopeKey,
       status: 'loading',
-      snapshot: prev?.userId === userId ? prev.snapshot : null,
+      snapshot: prev?.scopeKey === scopeKey ? prev.snapshot : null,
       errorKey: null,
-      generatedInvitation: prev?.userId === userId ? prev.generatedInvitation : null,
+      generatedInvitation: prev?.scopeKey === scopeKey ? prev.generatedInvitation : null,
     }));
 
     const result = await fetchCoupleSnapshot(userId);
+    if (!trackerRef.current.isCurrent(token)) {
+      return;
+    }
+
     if (result.ok) {
-      setScopedState((prev) => ({
-        userId,
-        status: 'loaded',
-        snapshot: result.data,
-        errorKey: null,
-        generatedInvitation: prev?.userId === userId ? prev.generatedInvitation : null,
-      }));
+      setScopedState((prev) => applyLoadedSnapshotToState(prev, scopeKey, result.data));
     } else {
       setScopedState((prev) => ({
-        userId,
+        scopeKey,
         status: 'error',
-        snapshot: prev?.userId === userId ? prev.snapshot : null,
+        snapshot: prev?.scopeKey === scopeKey ? prev.snapshot : null,
         errorKey: result.errorKey,
-        generatedInvitation: prev?.userId === userId ? prev.generatedInvitation : null,
+        generatedInvitation: prev?.scopeKey === scopeKey ? prev.generatedInvitation : null,
       }));
     }
   }, []);
 
   useEffect(() => {
-    if (!activeUserId) {
-      return;
+    const tracker = trackerRef.current;
+    tracker.setActiveScope(activeScopeKey);
+
+    if (!activeUserId || !activeScopeKey) {
+      return () => {
+        tracker.setActiveScope(null);
+        setScopedState(null);
+      };
     }
 
-    let isActive = true;
+    const token = tracker.beginRequest(activeScopeKey);
+    if (!token) {
+      return () => {
+        tracker.setActiveScope(null);
+        setScopedState(null);
+      };
+    }
+
     const targetUserId = activeUserId;
+    const targetScopeKey = activeScopeKey;
 
     void (async () => {
       const result = await fetchCoupleSnapshot(targetUserId);
-      if (!isActive) {
+      if (!tracker.isCurrent(token)) {
         return;
       }
       if (result.ok) {
-        setScopedState((prev) => ({
-          userId: targetUserId,
-          status: 'loaded',
-          snapshot: result.data,
-          errorKey: null,
-          generatedInvitation: prev?.userId === targetUserId ? prev.generatedInvitation : null,
-        }));
+        setScopedState((prev) => applyLoadedSnapshotToState(prev, targetScopeKey, result.data));
       } else {
         setScopedState((prev) => ({
-          userId: targetUserId,
+          scopeKey: targetScopeKey,
           status: 'error',
-          snapshot: prev?.userId === targetUserId ? prev.snapshot : null,
+          snapshot: prev?.scopeKey === targetScopeKey ? prev.snapshot : null,
           errorKey: result.errorKey,
-          generatedInvitation: prev?.userId === targetUserId ? prev.generatedInvitation : null,
+          generatedInvitation: prev?.scopeKey === targetScopeKey ? prev.generatedInvitation : null,
         }));
       }
     })();
 
     return () => {
-      isActive = false;
+      tracker.setActiveScope(null);
+      setScopedState(null);
     };
-  }, [activeUserId]);
+  }, [activeScopeKey, activeUserId]);
 
   const refresh = useCallback(async () => {
-    if (!activeUserId) {
+    if (!activeUserId || !activeScopeKey) {
       return;
     }
-    await loadForUser(activeUserId);
-  }, [activeUserId, loadForUser]);
+    await loadForScope(activeUserId, activeScopeKey);
+  }, [activeScopeKey, activeUserId, loadForScope]);
 
   const createSpace = useCallback(
     async (title: string) => {
+      const targetUserId = activeUserId;
+      const targetScopeKey = activeScopeKey;
       const result = await createCoupleSpace(title);
-      if (result.ok && activeUserId) {
-        await loadForUser(activeUserId);
+      if (
+        result.ok &&
+        targetUserId &&
+        targetScopeKey &&
+        trackerRef.current.isActiveScope(targetScopeKey)
+      ) {
+        await loadForScope(targetUserId, targetScopeKey);
       }
       return result;
     },
-    [activeUserId, loadForUser],
+    [activeScopeKey, activeUserId, loadForScope],
   );
 
   const createInvitation = useCallback(
     async (ttlHours = 24) => {
+      const targetUserId = activeUserId;
+      const targetScopeKey = activeScopeKey;
       const result = await createCoupleInvitation(ttlHours);
-      if (result.ok && activeUserId) {
+      if (
+        result.ok &&
+        targetUserId &&
+        targetScopeKey &&
+        trackerRef.current.isActiveScope(targetScopeKey)
+      ) {
         setScopedState((prev) => ({
-          userId: activeUserId,
-          status: prev?.userId === activeUserId ? prev.status : 'loading',
-          snapshot: prev?.userId === activeUserId ? prev.snapshot : null,
+          scopeKey: targetScopeKey,
+          status: prev?.scopeKey === targetScopeKey ? prev.status : 'loading',
+          snapshot: prev?.scopeKey === targetScopeKey ? prev.snapshot : null,
           errorKey: null,
           generatedInvitation: result.data,
         }));
-        await loadForUser(activeUserId);
+        await loadForScope(targetUserId, targetScopeKey);
       }
       return result;
     },
-    [activeUserId, loadForUser],
+    [activeScopeKey, activeUserId, loadForScope],
   );
 
   const acceptInvitation = useCallback(
     async (token: string) => {
+      const targetUserId = activeUserId;
+      const targetScopeKey = activeScopeKey;
       const result = await acceptCoupleInvitation(token);
-      if (result.ok && activeUserId) {
+      if (
+        result.ok &&
+        targetUserId &&
+        targetScopeKey &&
+        trackerRef.current.isActiveScope(targetScopeKey)
+      ) {
         setScopedState((prev) =>
-          prev?.userId === activeUserId ? { ...prev, generatedInvitation: null } : prev,
+          prev?.scopeKey === targetScopeKey ? { ...prev, generatedInvitation: null } : prev,
         );
-        await loadForUser(activeUserId);
+        await loadForScope(targetUserId, targetScopeKey);
       }
       return result;
     },
-    [activeUserId, loadForUser],
+    [activeScopeKey, activeUserId, loadForScope],
   );
 
   const revokeInvitation = useCallback(
     async (invitationId: string) => {
+      const targetUserId = activeUserId;
+      const targetScopeKey = activeScopeKey;
       const result = await revokeCoupleInvitation(invitationId);
-      if (result.ok && activeUserId) {
+      if (
+        result.ok &&
+        targetUserId &&
+        targetScopeKey &&
+        trackerRef.current.isActiveScope(targetScopeKey)
+      ) {
         setScopedState((prev) =>
-          prev?.userId === activeUserId ? { ...prev, generatedInvitation: null } : prev,
+          prev?.scopeKey === targetScopeKey ? { ...prev, generatedInvitation: null } : prev,
         );
-        await loadForUser(activeUserId);
+        await loadForScope(targetUserId, targetScopeKey);
       }
       return result;
     },
-    [activeUserId, loadForUser],
+    [activeScopeKey, activeUserId, loadForScope],
   );
 
   const saveDisplayName = useCallback(
     async (displayName: string) => {
-      if (!activeUserId) {
+      const targetUserId = activeUserId;
+      const targetScopeKey = activeScopeKey;
+      if (!targetUserId || !targetScopeKey) {
         return { ok: false, errorKey: 'notAuthenticated' } as const;
       }
-      const result = await updateOwnDisplayName(activeUserId, displayName);
-      if (result.ok) {
-        await loadForUser(activeUserId);
+      const result = await updateOwnDisplayName(targetUserId, displayName);
+      if (result.ok && trackerRef.current.isActiveScope(targetScopeKey)) {
+        await loadForScope(targetUserId, targetScopeKey);
       }
       return result;
     },
-    [activeUserId, loadForUser],
+    [activeScopeKey, activeUserId, loadForScope],
   );
 
   const clearGeneratedInvitation = useCallback(() => {
@@ -200,7 +244,7 @@ export function CoupleProvider({ children }: { readonly children: ReactNode }) {
   }, []);
 
   const value = useMemo<CoupleContextValue>(() => {
-    if (!activeUserId) {
+    if (!activeScopeKey) {
       return {
         status: 'idle',
         snapshot: null,
@@ -216,12 +260,12 @@ export function CoupleProvider({ children }: { readonly children: ReactNode }) {
       };
     }
 
-    const matchesActiveUser = scopedState?.userId === activeUserId;
+    const matchesScope = scopedState?.scopeKey === activeScopeKey;
     return {
-      status: matchesActiveUser ? scopedState.status : 'loading',
-      snapshot: matchesActiveUser ? scopedState.snapshot : null,
-      errorKey: matchesActiveUser ? scopedState.errorKey : null,
-      generatedInvitation: matchesActiveUser ? scopedState.generatedInvitation : null,
+      status: matchesScope ? scopedState.status : 'loading',
+      snapshot: matchesScope ? scopedState.snapshot : null,
+      errorKey: matchesScope ? scopedState.errorKey : null,
+      generatedInvitation: matchesScope ? scopedState.generatedInvitation : null,
       refresh,
       createSpace,
       createInvitation,
@@ -232,7 +276,7 @@ export function CoupleProvider({ children }: { readonly children: ReactNode }) {
     };
   }, [
     acceptInvitation,
-    activeUserId,
+    activeScopeKey,
     clearGeneratedInvitation,
     createInvitation,
     createSpace,

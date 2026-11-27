@@ -2,15 +2,18 @@ import type { Session } from '@supabase/supabase-js';
 
 import type { PreferredLanguage } from '@/features/couple/types';
 import { getSupabaseClient } from '@/lib/supabase';
+import {
+  executeSignUpWithClient,
+  type SignUpFlowResult,
+  type SignUpOutcome as GenericSignUpOutcome,
+} from './signUpFlow';
 import { mapAuthErrorToKey, type AuthErrorKey } from './validation';
 
 export type AuthServiceResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly errorKey: AuthErrorKey };
 
-export type SignUpOutcome =
-  | { readonly status: 'signed-in'; readonly session: Session }
-  | { readonly status: 'confirmation-required' };
+export type SignUpOutcome = GenericSignUpOutcome<Session>;
 
 function requireConfiguredClient() {
   return getSupabaseClient();
@@ -65,43 +68,40 @@ export async function signUpWithPassword(params: {
   password: string;
   displayName: string;
   preferredLanguage: PreferredLanguage;
-}): Promise<AuthServiceResult<SignUpOutcome>> {
+}): Promise<SignUpFlowResult<Session>> {
   const client = requireConfiguredClient();
   if (!client) {
     return { ok: false, errorKey: 'notConfigured' };
   }
 
-  try {
-    const { data, error } = await client.auth.signUp({
-      email: params.email,
-      password: params.password,
-      options: {
-        data: {
-          preferred_language: params.preferredLanguage,
-        },
+  return executeSignUpWithClient(
+    {
+      async signUp(input) {
+        const { data, error } = await client.auth.signUp({
+          email: input.email,
+          password: input.password,
+          options: {
+            data: {
+              preferred_language: input.preferredLanguage,
+            },
+          },
+        });
+        return {
+          session: data.session,
+          errorMessage: error?.message,
+        };
       },
-    });
-
-    if (error) {
-      return { ok: false, errorKey: mapAuthErrorToKey(error.message) };
-    }
-
-    if (!data.session) {
-      return { ok: true, data: { status: 'confirmation-required' } };
-    }
-
-    if (params.displayName.trim().length > 0) {
-      await client
-        .from('profiles')
-        .update({ display_name: params.displayName.trim() })
-        .eq('id', data.session.user.id);
-    }
-
-    return { ok: true, data: { status: 'signed-in', session: data.session } };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : undefined;
-    return { ok: false, errorKey: mapAuthErrorToKey(message) };
-  }
+      async updateDisplayName(userId, displayName) {
+        const { error } = await client
+          .from('profiles')
+          .update({ display_name: displayName })
+          .eq('id', userId);
+        return { errorMessage: error?.message };
+      },
+      mapError: mapAuthErrorToKey,
+    },
+    params,
+  );
 }
 
 export async function signOut(): Promise<AuthServiceResult<null>> {

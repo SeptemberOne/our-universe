@@ -90,6 +90,10 @@ export const zhCN: TranslationSchema = {
     title: '进入我们的宇宙',
     subtitle: '登录或创建账号，连接只属于你们两人的星海空间。',
     loadingSession: '正在检查登录状态…',
+    sessionError: {
+      title: '暂时无法验证登录状态',
+      retry: '重试',
+    },
     tabs: {
       signIn: '登录',
       signUp: '注册账号',
@@ -204,6 +208,7 @@ export const zhCN: TranslationSchema = {
       placeholder: '输入希望另一半看到的昵称',
       save: '保存昵称',
       savedSuccess: '昵称已更新。',
+      initialSaveWarning: '你的账号已创建成功，但初始昵称未能保存（{{reason}}），你可以在下方重新保存。',
     },
     validation: {
       titleTooLong: '空间名称不能超过 80 个字符。',

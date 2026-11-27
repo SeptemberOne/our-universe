@@ -7,17 +7,19 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { CelestialBackdrop } from '@/components/CelestialBackdrop';
+import { CelestialButton } from '@/components/CelestialButton';
+import { CelestialCard } from '@/components/CelestialCard';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { resolveProtectedRoute } from '@/features/auth/routeGuard';
 import { CoupleProvider, useCouple } from '@/features/couple/CoupleContext';
 import { hydrateLanguagePreference, i18n } from '@/i18n';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, layout, spacing, typography } from '@/theme/tokens';
 
 void SplashScreen.preventAutoHideAsync();
 
 function AuthNavigationShell() {
   const { t } = useTranslation();
-  const { isConfigured, status: authStatus } = useAuth();
+  const { isConfigured, status: authStatus, errorKey, retrySessionHydration } = useAuth();
   const { status: coupleStatus, snapshot } = useCouple();
   const pathname = usePathname();
   const router = useRouter();
@@ -39,6 +41,7 @@ function AuthNavigationShell() {
   }, [authStatus, coupleStatus, hasCouple, isConfigured, pathname, router]);
 
   const showSessionLoader = isConfigured && authStatus === 'loading';
+  const showSessionError = isConfigured && authStatus === 'error';
 
   return (
     <View style={styles.root}>
@@ -53,6 +56,24 @@ function AuthNavigationShell() {
           <CelestialBackdrop />
           <ActivityIndicator size="large" color={colors.accent.starlight} />
           <Text style={styles.loadingText}>{t('auth.loadingSession')}</Text>
+        </View>
+      ) : null}
+      {showSessionError ? (
+        <View style={styles.loadingOverlay} accessibilityLiveRegion="polite">
+          <CelestialBackdrop />
+          <CelestialCard highlighted style={styles.errorCard}>
+            <Text style={styles.errorTitle} accessibilityRole="header">
+              {t('auth.sessionError.title')}
+            </Text>
+            <Text style={styles.loadingText}>
+              {t(`auth.errors.${errorKey ?? 'unknown'}`)}
+            </Text>
+            <CelestialButton
+              label={t('auth.sessionError.retry')}
+              onPress={() => void retrySessionHydration()}
+              variant="primary"
+            />
+          </CelestialCard>
         </View>
       ) : null}
     </View>
@@ -114,6 +135,16 @@ const styles = StyleSheet.create({
   loadingText: {
     ...typography.body,
     color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  errorCard: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    gap: spacing.md,
+  },
+  errorTitle: {
+    ...typography.cardTitle,
+    color: colors.text.primary,
     textAlign: 'center',
   },
 });
