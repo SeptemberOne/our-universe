@@ -7,10 +7,20 @@ import type {
 
 export type RandomFn = () => number;
 
+function normalizeRandom(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  if (value >= 1) {
+    return 1 - Number.EPSILON;
+  }
+  return value;
+}
+
 export function shuffleArray<T>(items: readonly T[], randomFn: RandomFn = Math.random): T[] {
   const result = [...items];
   for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(randomFn() * (index + 1));
+    const swapIndex = Math.floor(normalizeRandom(randomFn()) * (index + 1));
     const current = result[index];
     const target = result[swapIndex];
     if (current !== undefined && target !== undefined) {
@@ -25,8 +35,9 @@ export function createDeck(
   pairIds: readonly MemoryArtworkId[],
   randomFn: RandomFn = Math.random,
 ): MemoryCardState[] {
+  const uniquePairIds = Array.from(new Set(pairIds));
   const unshuffled: MemoryCardState[] = [];
-  for (const pairId of pairIds) {
+  for (const pairId of uniquePairIds) {
     unshuffled.push(
       {
         cardId: `${pairId}-a`,
@@ -49,19 +60,24 @@ export function createInitialGameState(
   pairIds: readonly MemoryArtworkId[],
   randomFn: RandomFn = Math.random,
 ): MemoryGameState {
+  const uniquePairIds = Array.from(new Set(pairIds));
   return {
-    cards: createDeck(pairIds, randomFn),
+    cards: createDeck(uniquePairIds, randomFn),
     selectedCardIds: [],
     isResolvingMismatch: false,
     moves: 0,
     matchedPairs: 0,
-    totalPairs: pairIds.length,
+    totalPairs: uniquePairIds.length,
     status: 'idle',
   };
 }
 
 export function flipCard(state: MemoryGameState, cardId: string): FlipResult {
-  if (state.isResolvingMismatch || state.status === 'completed') {
+  if (
+    state.isResolvingMismatch ||
+    state.status === 'completed' ||
+    state.selectedCardIds.length >= 2
+  ) {
     return { state, outcome: 'ignored' };
   }
 
@@ -94,7 +110,7 @@ export function flipCard(state: MemoryGameState, cardId: string): FlipResult {
   }
 
   const firstCard = flippedCards.find((card) => card.cardId === firstCardId);
-  if (!firstCard) {
+  if (!firstCard || firstCard.isMatched) {
     return { state, outcome: 'ignored' };
   }
 
@@ -104,7 +120,7 @@ export function flipCard(state: MemoryGameState, cardId: string): FlipResult {
   if (firstCard.pairId === targetCard.pairId) {
     const matchedCards = flippedCards.map((card) =>
       card.cardId === firstCardId || card.cardId === cardId
-        ? { ...card, isMatched: true }
+        ? { ...card, isFlipped: true, isMatched: true }
         : card,
     );
     const nextMatchedPairs = state.matchedPairs + 1;
@@ -139,8 +155,15 @@ export function flipCard(state: MemoryGameState, cardId: string): FlipResult {
 }
 
 export function resolveMismatch(state: MemoryGameState): MemoryGameState {
-  if (!state.isResolvingMismatch || state.selectedCardIds.length === 0) {
+  if (!state.isResolvingMismatch) {
     return state;
+  }
+
+  if (state.selectedCardIds.length === 0) {
+    return {
+      ...state,
+      isResolvingMismatch: false,
+    };
   }
 
   const selectedSet = new Set(state.selectedCardIds);
@@ -159,6 +182,9 @@ export function resolveMismatch(state: MemoryGameState): MemoryGameState {
 }
 
 export function formatElapsedTime(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds)) {
+    return '00:00';
+  }
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
   const minutes = Math.floor(safeSeconds / 60);
   const seconds = safeSeconds % 60;
