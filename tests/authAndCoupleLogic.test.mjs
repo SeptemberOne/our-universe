@@ -21,6 +21,7 @@ import {
   applyLoadedSnapshotToState,
   createScopedRequestTracker,
 } from '../src/features/couple/coupleStateGuard.ts';
+import { shareInvitationToken } from '../src/features/couple/inviteShare.ts';
 
 test('validateAuthInput validates email, password, and display name for signIn and signUp', () => {
   assert.deepEqual(
@@ -522,4 +523,210 @@ test('executeSignUpWithClient surfaces profile update errors without losing crea
     ok: true,
     data: { status: 'confirmation-required' },
   });
+});
+
+test('shareInvitationToken uses Web Share API when supported and ignores clipboard', async () => {
+  const sharePayloads = [];
+  let clipboardCalled = false;
+
+  const outcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: secret-token-123',
+    token: 'secret-token-123',
+    webNavigator: {
+      canShare: () => true,
+      share: async (data) => {
+        sharePayloads.push(data);
+      },
+      clipboard: {
+        writeText: async () => {
+          clipboardCalled = true;
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(outcome, { status: 'shared' });
+  assert.deepEqual(sharePayloads, [
+    { title: 'Our Universe Invitation', text: 'Join with token: secret-token-123' },
+  ]);
+  assert.equal(clipboardCalled, false);
+});
+
+test('shareInvitationToken treats Web Share AbortError as cancellation without copying', async () => {
+  let clipboardCalled = false;
+  const abortError = new Error('Share aborted');
+  abortError.name = 'AbortError';
+
+  const outcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: secret-token-123',
+    token: 'secret-token-123',
+    webNavigator: {
+      share: async () => {
+        throw abortError;
+      },
+      clipboard: {
+        writeText: async () => {
+          clipboardCalled = true;
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(outcome, { status: 'cancelled' });
+  assert.equal(clipboardCalled, false);
+});
+
+test('shareInvitationToken falls back to Clipboard API on web when Web Share is unavailable or fails', async () => {
+  const copiedValues = [];
+
+  const noWebShareOutcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: token-a',
+    token: 'token-a',
+    webNavigator: {
+      clipboard: {
+        writeText: async (text) => {
+          copiedValues.push(text);
+        },
+      },
+    },
+  });
+  assert.deepEqual(noWebShareOutcome, { status: 'copied' });
+
+  const notAllowedError = new Error('Permission denied');
+  notAllowedError.name = 'NotAllowedError';
+
+  const rejectedWebShareOutcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: token-b',
+    token: 'token-b',
+    webNavigator: {
+      share: async () => {
+        throw notAllowedError;
+      },
+      clipboard: {
+        writeText: async (text) => {
+          copiedValues.push(text);
+        },
+      },
+    },
+  });
+  assert.deepEqual(rejectedWebShareOutcome, { status: 'copied' });
+  assert.deepEqual(copiedValues, ['token-a', 'token-b']);
+});
+
+test('shareInvitationToken falls back to DOM execCommand copy when Clipboard API is unavailable or fails', async () => {
+  const appendedNodes = [];
+  const removedNodes = [];
+  let selectedCount = 0;
+
+  const fakeBody = {
+    appendChild: (node) => {
+      appendedNodes.push(node);
+    },
+    removeChild: (node) => {
+      removedNodes.push(node);
+    },
+  };
+
+  const createdTextarea = {
+    value: '',
+    readOnly: false,
+    style: {},
+    setAttribute: () => {},
+    focus: () => {},
+    select: () => {
+      selectedCount += 1;
+    },
+    setSelectionRange: () => {},
+    parentNode: fakeBody,
+  };
+
+  const outcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: fallback-token',
+    token: 'fallback-token',
+    webNavigator: {
+      clipboard: {
+        writeText: async () => {
+          throw new Error('Clipboard blocked');
+        },
+      },
+    },
+    webDocument: {
+      createElement: () => createdTextarea,
+      body: fakeBody,
+      execCommand: (command) => {
+        assert.equal(command, 'copy');
+        assert.equal(createdTextarea.value, 'fallback-token');
+        assert.equal(createdTextarea.readOnly, true);
+        return true;
+      },
+    },
+  });
+
+  assert.deepEqual(outcome, { status: 'copied' });
+  assert.equal(selectedCount, 1);
+  assert.equal(appendedNodes.length, 1);
+  assert.equal(removedNodes.length, 1);
+  assert.equal(createdTextarea.value, '');
+});
+
+test('shareInvitationToken reports failure on web when sharing and all clipboard fallbacks fail', async () => {
+  const outcome = await shareInvitationToken({
+    platformOS: 'web',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: token-fail',
+    token: 'token-fail',
+    webNavigator: {},
+    webDocument: null,
+  });
+
+  assert.deepEqual(outcome, { status: 'failed' });
+});
+
+test('shareInvitationToken preserves native mobile Share behavior', async () => {
+  const calls = [];
+
+  const sharedOutcome = await shareInvitationToken({
+    platformOS: 'ios',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: ios-token',
+    token: 'ios-token',
+    nativeShare: async (content) => {
+      calls.push(content);
+      return { action: 'sharedAction' };
+    },
+  });
+  assert.deepEqual(sharedOutcome, { status: 'shared' });
+  assert.deepEqual(calls, [
+    { title: 'Our Universe Invitation', message: 'Join with token: ios-token' },
+  ]);
+
+  const cancelledOutcome = await shareInvitationToken({
+    platformOS: 'ios',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: ios-token',
+    token: 'ios-token',
+    nativeShare: async () => ({ action: 'dismissedAction' }),
+  });
+  assert.deepEqual(cancelledOutcome, { status: 'cancelled' });
+
+  const failedOutcome = await shareInvitationToken({
+    platformOS: 'android',
+    title: 'Our Universe Invitation',
+    message: 'Join with token: android-token',
+    token: 'android-token',
+    nativeShare: async () => {
+      throw new Error('Native share sheet failed');
+    },
+  });
+  assert.deepEqual(failedOutcome, { status: 'failed' });
 });

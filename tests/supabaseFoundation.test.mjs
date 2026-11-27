@@ -222,6 +222,7 @@ test('static SQL structure checks: migrations & verification script define harde
   for (const relPath of [
     'src/features/couple/CoupleContext.tsx',
     'src/features/couple/coupleService.ts',
+    'src/features/couple/inviteShare.ts',
     'src/app/couple.tsx',
     'src/features/photos/photoService.ts',
     'src/features/photos/usePhotoLibrary.ts',
